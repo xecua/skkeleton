@@ -1,7 +1,7 @@
 import { config } from "./config.ts";
 import { distinctBy } from "./deps/std/collections.ts";
 import { assertObject, isString } from "./deps/unknownutil.ts";
-import { functions } from "./function.ts";
+import { functions, functionsWithArgs } from "./function.ts";
 import { romToHira } from "./kana/rom_hira.ts";
 import { romToZen } from "./kana/rom_zen.ts";
 import type { KanaResult, KanaTable } from "./kana/type.ts";
@@ -24,7 +24,10 @@ export function getKanaTable(name = currentKanaTable.get()): KanaTable {
 
 function asKanaResult(result: unknown): KanaResult {
   if (typeof result === "string") {
-    const fn = functions.get()[result];
+    const [funcName, args] = String(result).split("-");
+    const fn = args
+      ? functionsWithArgs.get()[funcName]?.(args)
+      : functions.get()[funcName];
     if (!fn) {
       throw Error(`function not found: ${result}`);
     }

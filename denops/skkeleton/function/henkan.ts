@@ -7,7 +7,7 @@ import { keyToNotation } from "../notation.ts";
 import { getOkuriStr } from "../okuri.ts";
 import { HenkanState } from "../state.ts";
 import { kakutei } from "./common.ts";
-import { kakuteiFeed } from "./input.ts";
+import { henkanPoint, kakuteiFeed } from "./input.ts";
 import { jisyoTouroku } from "./jisyo.ts";
 
 export async function henkanFirst(context: Context, key: string) {
@@ -155,4 +155,11 @@ export async function henkanInput(context: Context, key: string) {
 
   await kakutei(context);
   await handleKey(context, keyToNotation[key] ?? key);
+}
+
+export function upper(key: string) {
+  return async function (context: Context) {
+    henkanPoint(context);
+    await handleKey(context, key);
+  };
 }

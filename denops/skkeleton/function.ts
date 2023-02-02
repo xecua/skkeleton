@@ -6,6 +6,7 @@ import {
   henkanFirst,
   henkanForward,
   henkanInput,
+  upper,
 } from "./function/henkan.ts";
 import { deleteChar, henkanPoint, kakuteiFeed } from "./function/input.ts";
 import { abbrev, hankatakana, katakana, zenkaku } from "./function/mode.ts";
@@ -15,6 +16,7 @@ export type Func = (
   context: Context,
   char: string,
 ) => void | Promise<void>;
+export type FuncWithArgs = (args: string) => Func;
 
 export const functions = new Cell<Record<string, Func>>(() => ({
   // common
@@ -39,4 +41,8 @@ export const functions = new Cell<Record<string, Func>>(() => ({
   katakana,
   hankatakana,
   zenkaku,
+}));
+
+export const functionsWithArgs = new Cell<Record<string, FuncWithArgs>>(() => ({
+  upper,
 }));

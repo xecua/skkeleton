@@ -1,6 +1,6 @@
 import { config } from "./config.ts";
 import type { Context } from "./context.ts";
-import { Func, functions } from "./function.ts";
+import { Func, functions, functionsWithArgs } from "./function.ts";
 import { cancel, kakutei, newline, purgeCandidate } from "./function/common.ts";
 import { escape } from "./function/disable.ts";
 import {
@@ -78,11 +78,16 @@ export function registerKeyMap(state: string, key: string, func: unknown) {
     delete keyMap.map[key];
     return;
   }
-  const fn = functions.get()[String(func)];
+
+  const [funcName, args] = String(func).split("-");
+  const fn = args
+    ? functionsWithArgs.get()[funcName]?.(args)
+    : functions.get()[funcName];
   if (!fn) {
     throw Error(`unknown function: ${func}`);
   }
   keyMap.map[key] = fn;
+
   if (config.debug) {
     console.log(keyMap);
   }
