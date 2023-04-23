@@ -29,7 +29,7 @@ function! s:send_notify() abort
 endfunction
 
 function! skkeleton#request_async(funcname, args) abort
-  if get(g:, 'skkeleton#init', v:false)
+  if denops#plugin#is_loaded('skkeleton')
     call denops#request('skkeleton', a:funcname, a:args)
   else
     let s:pending_notify = add(get(s:, 'pending_notify', []), [a:funcname, a:args])
@@ -236,10 +236,8 @@ function! skkeleton#close_candidates() abort
 endfunction
 
 function! skkeleton#getchar(msg) abort
-  autocmd CmdlineEnter * ++once let s:char = getchar()
-  autocmd CmdlineEnter * ++once call feedkeys("\<Esc>", 'n')
-  call input(a:msg)
-  return s:char
+  echo a:msg
+  return getchar()
 endfunction
 
 function skkeleton#get_config() abort
