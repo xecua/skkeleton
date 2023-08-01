@@ -78,6 +78,10 @@ skkeleton-mode-changed                                *skkeleton-mode-changed*
       autocmd User skkeleton-mode-changed redrawstatus
     augroup END
 <
+skkeleton-handled                                          *skkeleton-handled*
+
+        入力がハンドリングされた後に呼び出されます。
+        呼び出しの前に|g:skkeleton#state|に状態が代入されます。
 
 ------------------------------------------------------------------------------
 KEYMAPPINGS                                            *skkeleton-keymappings*
@@ -91,6 +95,7 @@ KEYMAPPINGS                                            *skkeleton-keymappings*
     " 例
     imap <C-j> <Plug>(skkeleton-enable)
     cmap <C-j> <Plug>(skkeleton-enable)
+    tmap <C-j> <Plug>(skkeleton-enable)
 <
 
 <Plug>(skkeleton-disable) (ic)                       *<Plug>(skkeleton-disable)*
@@ -100,6 +105,7 @@ KEYMAPPINGS                                            *skkeleton-keymappings*
     " 例
     imap <C-j> <Plug>(skkeleton-disable)
     cmap <C-j> <Plug>(skkeleton-disable)
+    tmap <C-j> <Plug>(skkeleton-disable)
 <
 
 <Plug>(skkeleton-toggle) (ic)                       *<Plug>(skkeleton-toggle)*
@@ -109,32 +115,33 @@ KEYMAPPINGS                                            *skkeleton-keymappings*
     " 例
     imap <C-j> <Plug>(skkeleton-toggle)
     cmap <C-j> <Plug>(skkeleton-toggle)
+    tmap <C-j> <Plug>(skkeleton-toggle)
 <
 有効時のマッピングは以下の通りです。
 こちらの定義は|skkeleton#register_keymap()|で変更できます
 
 input:
         <BS>      : |skkeleton-functions-deleteChar|
-        <C-Space> : |skkeleton-functions-henkanFirst|
         <C-g>     : |skkeleton-functions-cancel|
         <C-h>     : |skkeleton-functions-deleteChar|
         <C-q>     : |skkeleton-functions-hankatakana|
         <CR>      : |skkeleton-functions-newline|
         <Esc>     : |skkeleton-functions-escape|
         <NL>      : |skkeleton-functions-kakutei|
-        <S-Space> : |skkeleton-functions-henkanFirst|
 henkan:
-        <C-Space> : |skkeleton-functions-henkanForward|
         <C-g>     : |skkeleton-functions-cancel|
         <CR>      : |skkeleton-functions-newline|
         <NL>      : |skkeleton-functions-kakutei|
-        <S-Space> : |skkeleton-functions-henkanForward|
         <Space>   : |skkeleton-functions-henkanForward|
         X         : |skkeleton-function-purgeCandidate|
         x         : |skkeleton-function-henkanBackward|
 
 ------------------------------------------------------------------------------
 API                                                            *skkeleton-api*
+
+skkeleton#initialize()                                *skkeleton#initialize()*
+
+        skkeletonを手動で初期化します。辞書のロードも行います。
 
 skkeleton#is_enabled()                                *skkeleton#is_enabled()*
 
@@ -150,6 +157,17 @@ skkeleton#mode()                                            *skkeleton#mode()*
                 "hankata": 半角カタカナ
                 "zenkaku": 全角英数
                 "abbrev":  abbrev
+
+g:skkeleton#state                                          *g:skkeleton#state*
+
+        最後にハンドリングが実行された際の状態から生成される値です。
+        以下の内容から構成されます
+
+                phase: 入力の段階
+                    "input"            直接入力
+                    "input:okurinasi"  送りなし入力
+                    "input:okuriari"   送りあり入力
+                    "henkan"           変換
 
 ------------------------------------------------------------------------------
 CONFIG                                                      *skkeleton-config*
@@ -196,6 +214,7 @@ globalDictionaries                       *skkeleton-config-globalDictionaries*
     値の例: [["/usr/share/skk/SKK-JISYO.L", "euc-jp"],
              "~/.skk/SKK-JISYO.emoji"]
 <
+
 globalJisyo                                     *skkeleton-config-globalJisyo*
         (デフォルト "/usr/share/skk/SKK-JISYO.L")
         グローバル辞書のパス
@@ -230,7 +249,15 @@ kanaTable                                         *skkeleton-config-kanaTable*
         存在するテーブルのみ指定できます。存在しないテーブルを指定したい場合は
         |skkeleton#register_kanatable()| で先にテーブルを作成してください。
 
-
+globalKanaTableFiles                    *skkeleton-config-globalKanaTableFiles*
+        (デフォルト [])
+        複数のカナ変換テーブルを使用する際に指定するオプションです。
+        指定する値はグローバル辞書のパスまたは
+        パスとエンコーディングからなるタプルの配列になります。
+        エンコーディングを指定しない場合は自動判定されます。
+>
+    値の例: [["/usr/share/skk/azik_us.rule, "euc-jp"]]
+<
 keepState                                         *skkeleton-config-keepState*
         (デフォルト v:false)
         このオプションを有効にすると
@@ -315,7 +342,6 @@ skkeleton#register_kanatable({tableName}, {table}, {create})
           \ 'hh': ['お', 'h'],
           \ 'jj': 'escape',
           \ 'z,': ['―'],
-          \ "z\<Space>": ["\u3000"],
           \ })
     " ヘボン式入力
     call skkeleton#register_kanatable('rom', {
@@ -323,6 +349,11 @@ skkeleton#register_kanatable({tableName}, {table}, {create})
           \   'mm': ['ん', 'm'],
           \   'mp': ['ん', 'p'],
           \   'tch': ['っ', 'ch'],
+          \ })
+    " 句読点を全角英字に変える
+    call skkeleton#register_kanatable('rom', {
+          \   ',': ['，', ''],
+          \   '.': ['．', ''],
           \ })
 <
                                                  *skkeleton#register_keymap()*
@@ -385,6 +416,11 @@ https://skk-dev.github.io/dict/ で管理されているL辞書をダウンロ�
 展開するのをおすすめします。
 展開後は|skkeleton-config-globalJisyo|に展開したパスの指定をしてください。
 
+skkeleton のロード処理が遅い~
+
+デフォルトでは初回利用時にロードしますが、その間Vimをブロックしてしまいます。
+|skkeleton#initialize()| で明示的に初期化するようにしてください。
+
 変換ポイントの描画が乱れる~
 
 SKKではデフォルトで変換ポイントとして逆三角形を使いますが、この文字は
@@ -417,8 +453,25 @@ sticky keyの挙動をeskk.vimに合わせる~
     call skkeleton#register_keymap('input', ';', 'henkanPoint')
 <
 
+Vim の端末モードで漢字変換ができない~
+
+Vim は |:terminal| の挙動が異なるので漢字の変換をサポートしていません。neovim
+は動作します。
+
 ==============================================================================
 CHANGELOG                                                *skkeleton-changelog*
+
+2023-07-11~
+- ローマ字テーブルに `z<Space>` を全角スペースにするルールを追加
+
+2023-07-10~
+- ターミナルモードで動作するようにした(thanks @Shougo)
+
+2023-06-23~
+- 状態取得のために|g:skkeleton#state|を追加した
+
+2023-06-17~
+- 伸ばし棒が半角カナの変換対象になっていなかったので修正
 
 2023-03-05~
 - ローマ字入力時に`z(`及び`z)`が使えなかったので修正

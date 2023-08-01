@@ -5,6 +5,9 @@ augroup END
 
 let g:skkeleton#enabled = v:false
 let g:skkeleton#mode = ''
+let g:skkeleton#state = #{
+\   phase: '',
+\ }
 
 function! skkeleton#request(funcname, args) abort
   if denops#plugin#wait('skkeleton') != 0
@@ -32,12 +35,24 @@ function! skkeleton#request_async(funcname, args) abort
   if denops#plugin#is_loaded('skkeleton')
     call denops#request('skkeleton', a:funcname, a:args)
   else
-    let s:pending_notify = add(get(s:, 'pending_notify', []), [a:funcname, a:args])
-    augroup skkeleton-notify
-      autocmd!
-      autocmd User DenopsPluginPost:skkeleton call s:send_notify()
-    augroup END
+    call s:notify_later(a:funcname, a:args)
   endif
+endfunction
+
+function! skkeleton#notify_async(funcname, args) abort
+  if denops#plugin#is_loaded('skkeleton')
+    call denops#notify('skkeleton', a:funcname, a:args)
+  else
+    call s:notify_later(a:funcname, a:args)
+  endif
+endfunction
+
+function! s:notify_later(funcname, args) abort
+  let s:pending_notify = add(get(s:, 'pending_notify', []), [a:funcname, a:args])
+  augroup skkeleton-notify
+    autocmd!
+    autocmd User DenopsPluginPost:skkeleton ++once call s:send_notify()
+  augroup END
 endfunction
 
 function! skkeleton#config(config) abort
@@ -92,6 +107,10 @@ function! skkeleton#vim_status() abort
   let m = mode()
   if m ==# 'i'
     let prev_input = getline('.')[:col('.')-2]
+  elseif m ==# 't'
+    let current_line = has('nvim') ? getline('.') : term_getline('', '.')
+    let col = has('nvim') ? col('.') : term_getcursor(bufnr('%'))[1]
+    let prev_input = current_line[:col-2]
   else
     let prev_input = getcmdline()[:getcmdpos()-2]
   endif
@@ -105,18 +124,25 @@ endfunction
 
 function! skkeleton#handle(func, opts) abort
   let ret = skkeleton#request(a:func, [a:opts, skkeleton#vim_status()])
-  if ret =~# "^<Cmd>"
-    let ret = "\<Cmd>" .. ret[5:] .. "\<CR>"
+
+  let g:skkeleton#state = ret.state
+
+  let result = ret.result
+  if result =~# "^<Cmd>"
+    let result = "\<Cmd>" .. result[5:] .. "\<CR>"
   endif
+
   call skkeleton#doautocmd()
+
   if get(a:opts, 'expr', v:false)
-    return ret
-  else
-    call feedkeys(ret, 'nit')
+    return result
+  endif
+
+  if result !=# ''
+    call feedkeys(result, 'nit')
   endif
 endfunction
 
-" copied from eskk.vim
 function! skkeleton#get_default_mapped_keys() abort "{{{
     return split(
                 \   'abcdefghijklmnopqrstuvwxyz'
@@ -134,8 +160,6 @@ function! skkeleton#get_default_mapped_keys() abort "{{{
                 \   '<C-h>',
                 \   '<CR>',
                 \   '<Space>',
-                \   '<C-Space>',
-                \   '<S-Space>',
                 \   '<C-q>',
                 \   '<PageUp>',
                 \   '<PageDown>',
@@ -149,12 +173,20 @@ endfunction "}}}
 
 let g:skkeleton#mapped_keys = extend(get(g:, 'skkeleton#mapped_keys', []), skkeleton#get_default_mapped_keys())
 
+let s:mapbuf = {}
+
 function! skkeleton#map() abort
   if mode() ==# 'n'
     let modes = ['i', 'c']
+    let mode = 'i'
   else
     let modes = [mode()]
+    let mode = mode()
   endif
+  let b = bufnr()
+  let s:mapbuf[b] = get(s:mapbuf, b, {})
+  let s:mapbuf[b][mode] = get(s:mapbuf[b], mode, {})
+  let mapbuf = s:mapbuf[b][mode]
   for c in g:skkeleton#mapped_keys
     " notation to lower
     if len(c) > 1 && c[0] ==# '<' && c !=? '<bar>'
@@ -170,14 +202,35 @@ function! skkeleton#map() abort
         let func = match[1]
       endif
     endfor
-    execute printf('lnoremap <buffer> <nowait> %s <Cmd>call skkeleton#handle(%s, {"key": %s})<CR>', c, string(func), string(k))
+    let mapbuf[c] = get(mapbuf, c, maparg(c, mode, v:false, v:true))
+    execute printf('%snoremap <buffer> <nowait> %s <Cmd>call skkeleton#handle(%s, {"key": %s})<CR>',
+          \ mode,
+          \ c, string(func), string(k))
   endfor
 endfunction
 
 function! skkeleton#unmap() abort
-  for c in skkeleton#get_default_mapped_keys()
-    silent! execute printf('lunmap <buffer> %s', c)
+  let b = bufnr()
+  let mapbuf = get(s:mapbuf, b, {})
+  for [mode, keys] in items(mapbuf)
+    for [key, map] in items(keys)
+      if get(map, 'buffer', 0)
+        call mapset(mode, v:false, map)
+      else
+        execute printf('%sunmap <buffer> %s', mode, key)
+      endif
+    endfor
   endfor
+  let s:mapbuf[b] = {}
+endfunction
+
+function! skkeleton#disable()
+  if g:skkeleton#enabled
+    doautocmd <nomodeline> User skkeleton-disable-pre
+    call skkeleton#unmap()
+    doautocmd <nomodeline> User skkeleton-disable-post
+    let g:skkeleton#enabled = v:false
+  endif
 endfunction
 
 let s:windows = []
@@ -240,6 +293,10 @@ function! skkeleton#getchar(msg) abort
   return getchar()
 endfunction
 
-function skkeleton#get_config() abort
+function! skkeleton#get_config() abort
   return denops#request('skkeleton', 'getConfig', [])
+endfunction
+
+function! skkeleton#initialize() abort
+  call skkeleton#notify_async('initialize', [])
 endfunction

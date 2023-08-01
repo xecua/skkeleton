@@ -9,12 +9,14 @@ import {
 import { functions } from "./function.ts";
 import { disable as disableFunc } from "./function/disable.ts";
 import { initializeStateWithAbbrev, modeChange } from "./mode.ts";
+import { hirakana } from "./function/mode.ts";
 import { load as jisyoLoad, SkkServer } from "./jisyo.ts";
 import { currentKanaTable, registerKanaTable } from "./kana.ts";
 import { handleKey, registerKeyMap } from "./keymap.ts";
 import { keyToNotation, notationToKey, receiveNotation } from "./notation.ts";
 import { currentContext, currentLibrary } from "./store.ts";
 import type { CompletionData, RankData, SkkServerOptions } from "./types.ts";
+import { homeExpand } from "./util.ts";
 
 type Opts = {
   key: string;
@@ -22,22 +24,37 @@ type Opts = {
   expr?: boolean;
 };
 
+type CompleteInfo = {
+  pum_visible: boolean;
+  selected: number;
+};
+
+type VimStatus = {
+  prevInput: string;
+  completeInfo: CompleteInfo;
+  completeType: string;
+  mode: string;
+};
+
+type HandleResult = {
+  state: {
+    phase: string;
+  };
+  result: string;
+};
+
 // deno-lint-ignore no-explicit-any
-function assertOpts(x: any): asserts x is Opts {
-  if (typeof x?.key !== "string") {
+function isOpts(x: any): x is Opts {
+  return typeof x?.key === "string";
+}
+
+function assertOpts(x: unknown): asserts x is Opts {
+  if (!isOpts(x)) {
     throw new AssertError("value must be Opts");
   }
 }
 
 let initialized = false;
-
-function homeExpand(path: string, homePath: string): string {
-  if (path[0] === "~") {
-    return homePath + path.slice(1);
-  } else {
-    return path;
-  }
-}
 
 async function init(denops: Denops) {
   if (initialized) {
@@ -73,26 +90,26 @@ async function init(denops: Denops) {
     };
     skkServer = new SkkServer(skkServerOptions);
   }
-  const homePath = await fn.expand(denops, "~") as string;
-  const globalDictionaries =
+  const globalDictionaries = await Promise.all(
     (config.globalDictionaries.length === 0
       ? [[config.globalJisyo, config.globalJisyoEncoding]]
       : config.globalDictionaries)
-      .map((
+      .map(async (
         cfg,
-      ): [string, string] => {
+      ): Promise<[string, string]> => {
         if (typeof (cfg) === "string") {
-          return [homeExpand(cfg, homePath), ""];
+          return [await homeExpand(cfg, denops), ""];
         } else {
-          return [homeExpand(cfg[0], homePath), cfg[1]];
+          return [await homeExpand(cfg[0], denops), cfg[1]];
         }
-      });
+      }),
+  );
   currentLibrary.setInitializer(async () =>
     await jisyoLoad(
       globalDictionaries,
       {
-        path: homeExpand(userJisyo, homePath),
-        rankPath: homeExpand(completionRankFile, homePath),
+        path: await homeExpand(userJisyo, denops),
+        rankPath: await homeExpand(completionRankFile, denops),
       },
       skkServer,
     )
@@ -110,12 +127,7 @@ async function init(denops: Denops) {
     helper.define(
       ["InsertLeave", "CmdlineLeave"],
       "*",
-      `setlocal iminsert=0`,
-    );
-    helper.define(
-      ["InsertLeave", "CmdlineLeave"],
-      "*",
-      `let g:skkeleton#enabled = v:false`,
+      `call skkeleton#disable()`,
     );
   });
   try {
@@ -135,46 +147,47 @@ async function enable(opts?: unknown, vimStatus?: unknown): Promise<string> {
     return "";
   }
   if (
-    (state.type !== "input" || state.mode !== "direct") && opts && vimStatus
+    (state.type !== "input" || state.mode !== "direct") && isOpts(opts) &&
+    vimStatus
   ) {
     return handle(opts, vimStatus);
   }
-  if (await denops.eval("&l:iminsert") !== 1) {
-    // Note: must set before context initialization
-    currentKanaTable.set(config.kanaTable);
+  // Note: must set before context initialization
+  currentKanaTable.set(config.kanaTable);
 
-    currentContext.init().denops = denops;
-    try {
-      await denops.cmd("doautocmd <nomodeline> User skkeleton-enable-pre");
-    } catch (e) {
-      console.log(e);
-    }
-
-    // NOTE: Disable textwidth
-    currentContext.get().textwidth = await op.textwidth.getLocal(denops);
-    await op.textwidth.setLocal(denops, 0);
-
-    await denops.call("skkeleton#map");
-    await op.iminsert.setLocal(denops, 1);
-    await vars.b.set(denops, "keymap_name", "skkeleton");
-    await vars.g.set(denops, "skkeleton#enabled", true);
-    await modeChange(currentContext.get(), "hira");
-    try {
-      await denops.cmd("doautocmd <nomodeline> User skkeleton-enable-post");
-    } catch (e) {
-      console.log(e);
-    }
-    return "\x1e"; // <C-^>
-  } else {
-    return "";
+  currentContext.init().denops = denops;
+  try {
+    await denops.cmd("doautocmd <nomodeline> User skkeleton-enable-pre");
+  } catch (e) {
+    console.log(e);
   }
+
+  if (context.mode === "zenkaku") {
+    hirakana(context);
+  }
+
+  // NOTE: Disable textwidth
+  currentContext.get().textwidth = await op.textwidth.getLocal(denops);
+  await op.textwidth.setLocal(denops, 0);
+
+  await denops.call("skkeleton#map");
+  await vars.b.set(denops, "keymap_name", "skkeleton");
+  await vars.g.set(denops, "skkeleton#enabled", true);
+  await modeChange(currentContext.get(), "hira");
+  try {
+    await denops.cmd("doautocmd <nomodeline> User skkeleton-enable-post");
+  } catch (e) {
+    console.log(e);
+  }
+  return "";
 }
 
 async function disable(opts?: unknown, vimStatus?: unknown): Promise<string> {
   const context = currentContext.get();
   const state = currentContext.get().state;
   if (
-    (state.type !== "input" || state.mode !== "direct") && opts && vimStatus
+    (state.type !== "input" || state.mode !== "direct") && isOpts(opts) &&
+    vimStatus
   ) {
     return handle(opts, vimStatus);
   }
@@ -201,18 +214,6 @@ function handleCompleteKey(
   }
   return null;
 }
-
-type CompleteInfo = {
-  pum_visible: boolean;
-  selected: number;
-};
-
-type VimStatus = {
-  prevInput: string;
-  completeInfo: CompleteInfo;
-  completeType: string;
-  mode: string;
-};
 
 async function handle(
   opts: unknown,
@@ -264,15 +265,37 @@ async function handle(
   return output;
 }
 
+function buildResult(result: string): HandleResult {
+  const state = currentContext.get().state;
+  let phase = "";
+  if (state.type === "input") {
+    if (state.mode === "okurinasi") {
+      phase = "input:okurinasi";
+    } else if (state.mode === "okuriari") {
+      phase = "input:okuriari";
+    } else {
+      phase = "input";
+    }
+  } else {
+    phase = "henkan";
+  }
+  return {
+    state: {
+      phase,
+    },
+    result,
+  };
+}
+
 export async function main(denops: Denops) {
   if (await vars.g.get(denops, "skkeleton#debug", false)) {
     config.debug = true;
   }
   denops.dispatcher = {
-    config(config: unknown) {
+    async config(config: unknown) {
       assertObject(config);
-      setConfig(config);
-      return Promise.resolve();
+      await setConfig(config, denops);
+      return;
     },
     async registerKeyMap(state: unknown, key: unknown, funcName: unknown) {
       assertString(state);
@@ -285,25 +308,25 @@ export async function main(denops: Denops) {
       registerKanaTable(tableName, table, !!create);
       return Promise.resolve();
     },
-    async enable(opts: unknown, vimStatus: unknown): Promise<string> {
+    async enable(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
       await init(denops);
-      return await enable(opts, vimStatus);
+      return buildResult(await enable(opts, vimStatus));
     },
-    async disable(opts: unknown, vimStatus: unknown): Promise<string> {
+    async disable(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
       await init(denops);
-      return await disable(opts, vimStatus);
+      return buildResult(await disable(opts, vimStatus));
     },
-    async toggle(opts: unknown, vimStatus: unknown): Promise<string> {
+    async toggle(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
       await init(denops);
       const mode = await vars.g.get(denops, "skkeleton#mode", "");
-      if (await denops.eval("&l:iminsert") !== 1 || mode === "") {
-        return await enable(opts, vimStatus);
+      if (!await denops.eval("g:skkeleton#enabled") || mode === "") {
+        return buildResult(await enable(opts, vimStatus));
       } else {
-        return await disable(opts, vimStatus);
+        return buildResult(await disable(opts, vimStatus));
       }
     },
-    handleKey(opts: unknown, vimStatus: unknown): Promise<string> {
-      return handle(opts, vimStatus);
+    async handleKey(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
+      return buildResult(await handle(opts, vimStatus));
     },
     reset() {
       currentContext.init().denops = denops;
@@ -339,6 +362,10 @@ export async function main(denops: Denops) {
       const lib = await currentLibrary.get();
       return Promise.resolve(lib.getRanks(state.henkanFeed));
     },
+    async registerCandidate(kana: unknown, word: unknown) {
+      // Note: This method is compatible to completion source
+      await denops.dispatcher.completeCallback(kana, word);
+    },
     async completeCallback(kana: unknown, word: unknown) {
       assertString(kana);
       assertString(word);
@@ -354,6 +381,12 @@ export async function main(denops: Denops) {
     // deno-lint-ignore require-await
     async getConfig() {
       return config;
+    },
+    async initialize() {
+      await init(denops);
+
+      // NOTE: Initialize dictionary
+      await currentLibrary.get();
     },
   };
   if (config.debug) {
