@@ -332,7 +332,7 @@ userJisyo                                     *skkeleton-config-userJisyo*
 
 ------------------------------------------------------------------------------
                                               *skkeleton#register_kanatable()*
-skkeleton#register_kanatable({tableName}, {table}, {create})
+skkeleton#register_kanatable({tableName}, {table} [, {create}])
         仮名入力のテーブルを登録できます。
         {tableName}で指定したテーブルに{table}で指定した辞書の定義が登録されま
         す。{create}が指定されていない場合は存在しないテーブル名を指定すると
@@ -468,8 +468,25 @@ Vim の端末モードで漢字変換ができない~
 Vim は |:terminal| の挙動が異なるので漢字の変換をサポートしていません。neovim
 は動作します。
 
+skkeleton有効時にカーソルの色がlCursorにならない~
+
+skkeletonは|:lmap|を使用しなくなりました。カーソルの色を動的に変更したい場合は
+以下のような設定をする必要があります。
+
+>
+    augroup skkeleton-cursor
+      autocmd!
+      autocmd User skkeleton-enable-pre
+            \ highlight Cursor       gui=NONE guibg=#80403f guifg=fg
+      autocmd User skkeleton-disable-pre
+            \ highlight Cursor       gui=NONE guibg=#606060 guifg=fg
+    augroup END
+<
 ==============================================================================
 CHANGELOG                                                *skkeleton-changelog*
+
+2023-08-17~
+- |skkeleton-mode-changed|がcmdlineを抜けた際などに呼ばれていなかったので修正
 
 2023-08-01~
 - `immediatelyOkuriConvert`オプションを追加

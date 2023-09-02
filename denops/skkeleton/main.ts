@@ -1,11 +1,6 @@
 import { config, setConfig } from "./config.ts";
 import { autocmd, Denops, fn, op, vars } from "./deps.ts";
-import {
-  AssertError,
-  assertObject,
-  assertString,
-  isString,
-} from "./deps/unknownutil.ts";
+import { assert, AssertError, is } from "./deps/unknownutil.ts";
 import { functions } from "./function.ts";
 import { disable as disableFunc } from "./function/disable.ts";
 import { initializeStateWithAbbrev, modeChange } from "./mode.ts";
@@ -19,7 +14,7 @@ import type { CompletionData, RankData, SkkServerOptions } from "./types.ts";
 import { homeExpand } from "./util.ts";
 
 type Opts = {
-  key: string;
+  key: string | string[];
   function?: string;
   expr?: boolean;
 };
@@ -45,7 +40,7 @@ type HandleResult = {
 
 // deno-lint-ignore no-explicit-any
 function isOpts(x: any): x is Opts {
-  return typeof x?.key === "string";
+  return is.String(x?.key) || is.ArrayOf(is.String)(x?.key);
 }
 
 function assertOpts(x: unknown): asserts x is Opts {
@@ -97,7 +92,7 @@ async function init(denops: Denops) {
       .map(async (
         cfg,
       ): Promise<[string, string]> => {
-        if (typeof (cfg) === "string") {
+        if (is.String(cfg)) {
           return [await homeExpand(cfg, denops), ""];
         } else {
           return [await homeExpand(cfg[0], denops), cfg[1]];
@@ -220,7 +215,7 @@ async function handle(
   vimStatus: unknown,
 ): Promise<string> {
   assertOpts(opts);
-  const key = opts.key;
+  const keyList = is.String(opts.key) ? [opts.key] : opts.key;
   const { prevInput, completeInfo, completeType, mode } =
     vimStatus as VimStatus;
   const context = currentContext.get();
@@ -229,7 +224,9 @@ async function handle(
     if (config.debug) {
       console.log("input after complete");
     }
-    const notation = keyToNotation[notationToKey[key]];
+    const notation = keyList.map((key) => {
+      return keyToNotation[notationToKey[key]] || key;
+    }).join("");
     if (config.debug) {
       console.log({
         completeType,
@@ -241,7 +238,7 @@ async function handle(
       completeType,
       notation,
     );
-    if (isString(handled)) {
+    if (is.String(handled)) {
       await initializeStateWithAbbrev(context, ["converter"]);
       context.preEdit.output("");
       return handled;
@@ -254,9 +251,13 @@ async function handle(
   }
   const before = context.mode;
   if (opts.function) {
-    await functions.get()[opts.function](context, key);
+    for (const key of keyList) {
+      await functions.get()[opts.function](context, key);
+    }
   } else {
-    await handleKey(context, key);
+    for (const key of keyList) {
+      await handleKey(context, key);
+    }
   }
   const output = context.preEdit.output(context.toString());
   if (output === "" && before !== context.mode) {
@@ -293,18 +294,18 @@ export async function main(denops: Denops) {
   }
   denops.dispatcher = {
     async config(config: unknown) {
-      assertObject(config);
+      assert(config, is.Record);
       await setConfig(config, denops);
       return;
     },
     async registerKeyMap(state: unknown, key: unknown, funcName: unknown) {
-      assertString(state);
-      assertString(key);
+      assert(state, is.String);
+      assert(key, is.String);
       await receiveNotation(denops);
       registerKeyMap(state, key, funcName);
     },
     registerKanaTable(tableName: unknown, table: unknown, create: unknown) {
-      assertString(tableName);
+      assert(tableName, is.String);
       registerKanaTable(tableName, table, !!create);
       return Promise.resolve();
     },
@@ -367,8 +368,8 @@ export async function main(denops: Denops) {
       await denops.dispatcher.completeCallback(kana, word);
     },
     async completeCallback(kana: unknown, word: unknown) {
-      assertString(kana);
-      assertString(word);
+      assert(kana, is.String);
+      assert(word, is.String);
       const lib = await currentLibrary.get();
       await lib.registerCandidate("okurinasi", kana, word);
       const context = currentContext.get();

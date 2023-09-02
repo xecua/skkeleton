@@ -175,6 +175,23 @@ let g:skkeleton#mapped_keys = extend(get(g:, 'skkeleton#mapped_keys', []), skkel
 
 let s:mapbuf = {}
 
+" 現在のマッピングを保存する
+" disable時に復元される
+function skkeleton#save_map(mode, lhs)
+  if type(a:lhs) == v:t_string
+    let list = [a:lhs]
+  else
+    let list = a:lhs
+  endif
+  let b = bufnr()
+  let s:mapbuf[b] = get(s:mapbuf, b, {})
+  let s:mapbuf[b][a:mode] = get(s:mapbuf[b], a:mode, {})
+  let mapbuf = s:mapbuf[b][a:mode]
+  for lhs in list
+    let mapbuf[lhs] = get(mapbuf, lhs, maparg(lhs, a:mode, v:false, v:true))
+  endfor
+endfunction
+
 function! skkeleton#map() abort
   if mode() ==# 'n'
     let modes = ['i', 'c']
@@ -228,6 +245,8 @@ function! skkeleton#disable()
   if g:skkeleton#enabled
     doautocmd <nomodeline> User skkeleton-disable-pre
     call skkeleton#unmap()
+    let g:skkeleton#mode = ''
+    doautocmd <nomodeline> User skkeleton-mode-changed
     doautocmd <nomodeline> User skkeleton-disable-post
     let g:skkeleton#enabled = v:false
   endif
