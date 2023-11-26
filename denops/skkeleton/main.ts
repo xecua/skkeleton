@@ -5,7 +5,7 @@ import { functions } from "./function.ts";
 import { disable as disableFunc } from "./function/disable.ts";
 import { initializeStateWithAbbrev, modeChange } from "./mode.ts";
 import { hirakana } from "./function/mode.ts";
-import { load as jisyoLoad, SkkServer } from "./jisyo.ts";
+import { GoogleJapaneseInput, load as jisyoLoad, SkkServer } from "./jisyo.ts";
 import { currentKanaTable, registerKanaTable } from "./kana.ts";
 import { handleKey, registerKeyMap } from "./keymap.ts";
 import { keyToNotation, notationToKey, receiveNotation } from "./notation.ts";
@@ -68,6 +68,7 @@ async function init(denops: Denops) {
   const {
     completionRankFile,
     userJisyo,
+    useGoogleJapaneseInput,
     useSkkServer,
     skkServerHost,
     skkServerPort,
@@ -75,6 +76,7 @@ async function init(denops: Denops) {
     skkServerReqEnc,
   } = config;
   let skkServer: SkkServer | undefined;
+  let googleJapaneseInput: GoogleJapaneseInput | undefined;
   let skkServerOptions: SkkServerOptions | undefined;
   if (useSkkServer) {
     skkServerOptions = {
@@ -84,6 +86,9 @@ async function init(denops: Denops) {
       responseEnc: skkServerResEnc,
     };
     skkServer = new SkkServer(skkServerOptions);
+  }
+  if (useGoogleJapaneseInput) {
+    googleJapaneseInput = new GoogleJapaneseInput();
   }
   const globalDictionaries = await Promise.all(
     (config.globalDictionaries.length === 0
@@ -107,6 +112,7 @@ async function init(denops: Denops) {
         rankPath: await homeExpand(completionRankFile, denops),
       },
       skkServer,
+      googleJapaneseInput,
     )
   );
   await receiveNotation(denops);
@@ -278,7 +284,7 @@ function buildResult(result: string): HandleResult {
       phase = "input";
     }
   } else {
-    phase = "henkan";
+    phase = state.type;
   }
   return {
     state: {
@@ -347,13 +353,13 @@ export async function main(denops: Denops) {
       }
       return Promise.resolve(state.henkanFeed);
     },
-    async getCandidates(): Promise<CompletionData> {
+    async getCompletionResult(): Promise<CompletionData> {
       const state = currentContext.get().state;
       if (state.type !== "input") {
         return Promise.resolve([]);
       }
       const lib = await currentLibrary.get();
-      return lib.getCandidates(state.henkanFeed, state.feed);
+      return lib.getCompletionResult(state.henkanFeed, state.feed);
     },
     async getRanks(): Promise<RankData> {
       const state = currentContext.get().state;
@@ -363,7 +369,7 @@ export async function main(denops: Denops) {
       const lib = await currentLibrary.get();
       return Promise.resolve(lib.getRanks(state.henkanFeed));
     },
-    async registerCandidate(kana: unknown, word: unknown) {
+    async registerHenkanResult(kana: unknown, word: unknown) {
       // Note: This method is compatible to completion source
       await denops.dispatcher.completeCallback(kana, word);
     },
@@ -371,7 +377,7 @@ export async function main(denops: Denops) {
       assert(kana, is.String);
       assert(word, is.String);
       const lib = await currentLibrary.get();
-      await lib.registerCandidate("okurinasi", kana, word);
+      await lib.registerHenkanResult("okurinasi", kana, word);
       const context = currentContext.get();
       context.lastCandidate = {
         type: "okurinasi",

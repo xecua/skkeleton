@@ -9,6 +9,18 @@ import {
 } from "./jisyo.ts";
 import { readFileWithEncoding } from "./util.ts";
 
+const newJisyoJson = join(
+  dirname(fromFileUrl(import.meta.url)),
+  "testdata",
+  "newJisyo.json",
+);
+
+const newJisyoYaml = join(
+  dirname(fromFileUrl(import.meta.url)),
+  "testdata",
+  "newJisyo.yaml",
+);
+
 const globalJisyo = join(
   dirname(fromFileUrl(import.meta.url)),
   "testdata",
@@ -35,18 +47,48 @@ const numIncludingJisyo = join(
 
 async function load(path: string, encoding: string): Promise<SKKDictionary> {
   const dic = new SKKDictionary();
-  dic.load(await readFileWithEncoding(path, encoding));
+  if (path.endsWith(".json")) {
+    dic.loadJson(await readFileWithEncoding(path, encoding));
+  } else if (path.endsWith(".yaml") || path.endsWith(".yml")) {
+    dic.loadYaml(await readFileWithEncoding(path, encoding));
+  } else {
+    dic.load(await readFileWithEncoding(path, encoding));
+  }
   return dic;
 }
+
+Deno.test({
+  name: "load new JisyoJson",
+  async fn() {
+    const jisyo = await load(newJisyoJson, "utf-8");
+    const manager = new Library([jisyo]);
+    const ari = await manager.getHenkanResult("okuriari", "わるs");
+    assertEquals(["悪"], ari);
+    const nasi = await manager.getHenkanResult("okurinasi", "あかね");
+    assertEquals(nasi, ["茜"]);
+  },
+});
+
+Deno.test({
+  name: "load new JisyoYaml",
+  async fn() {
+    const jisyo = await load(newJisyoYaml, "utf-8");
+    const manager = new Library([jisyo]);
+    const ari = await manager.getHenkanResult("okuriari", "わるs");
+    assertEquals(["悪"], ari);
+    const nasi = await manager.getHenkanResult("okurinasi", "あかね");
+    assertEquals(nasi, ["茜"]);
+  },
+});
 
 Deno.test({
   name: "get candidates",
   async fn() {
     const jisyo = await load(globalJisyo, "euc-jp");
     const manager = new Library([jisyo]);
-    const ari = await manager.getCandidate("okuriari", "てすt");
+    const ari = await manager.getHenkanResult("okuriari", "てすt");
     assertEquals(["テスト"], ari);
-    const nasi = await manager.getCandidate("okurinasi", "てすと");
+    const nasi = await manager.getHenkanResult("okurinasi", "てすと");
     assertEquals(nasi, ["テスト", "test"]);
   },
 });
@@ -56,7 +98,7 @@ Deno.test({
   async fn() {
     const jisyo = wrapDictionary(await load(numJisyo, "euc-jp"));
     const manager = new Library([jisyo]);
-    const nasi = await manager.getCandidate("okurinasi", "101ばん");
+    const nasi = await manager.getHenkanResult("okurinasi", "101ばん");
     assertEquals(nasi, [
       "101番",
       "１０１番",
@@ -65,6 +107,8 @@ Deno.test({
       "CI番",
       "佰壱番",
     ]);
+    // HEAD
+    //
   },
 });
 
@@ -73,9 +117,9 @@ Deno.test({
   async fn() {
     const jisyo = wrapDictionary(await load(numJisyo, "euc-jp"));
     const manager = new Library([jisyo]);
-    const nasi1 = await manager.getCandidate("okurinasi", "11おうて");
+    const nasi1 = await manager.getHenkanResult("okurinasi", "11おうて");
     assertEquals(nasi1, ["１一王手"]);
-    const nasi2 = await manager.getCandidate("okurinasi", "111おうて");
+    const nasi2 = await manager.getHenkanResult("okurinasi", "111おうて");
     assertEquals(nasi2, ["111王手"]);
   },
 });
@@ -85,10 +129,11 @@ Deno.test({
   async fn() {
     const jisyo = wrapDictionary(await load(numIncludingJisyo, "utf-8"));
     const manager = new Library([jisyo]);
-    const nasi1 = await manager.getCandidate("okurinasi", "cat2");
+    const nasi1 = await manager.getHenkanResult("okurinasi", "cat2");
     assertEquals(nasi1, ["🐈"]);
-    const nasi2 = await manager.getCandidate("okurinasi", "1000001");
+    const nasi2 = await manager.getHenkanResult("okurinasi", "1000001");
     assertEquals(nasi2, ["東京都千代田区千代田"]);
+    //vim-skk/main
   },
 });
 
@@ -97,12 +142,18 @@ Deno.test({
   async fn() {
     const manager = new Library();
     // most recently registered
-    await manager.registerCandidate("okurinasi", "test", "a");
-    await manager.registerCandidate("okurinasi", "test", "b");
-    assertEquals(["b", "a"], await manager.getCandidate("okurinasi", "test"));
+    await manager.registerHenkanResult("okurinasi", "test", "a");
+    await manager.registerHenkanResult("okurinasi", "test", "b");
+    assertEquals(
+      ["b", "a"],
+      await manager.getHenkanResult("okurinasi", "test"),
+    );
     // and remove duplicate
-    await manager.registerCandidate("okurinasi", "test", "a");
-    assertEquals(["a", "b"], await manager.getCandidate("okurinasi", "test"));
+    await manager.registerHenkanResult("okurinasi", "test", "a");
+    assertEquals(
+      ["a", "b"],
+      await manager.getHenkanResult("okurinasi", "test"),
+    );
   },
 });
 
@@ -111,16 +162,16 @@ Deno.test({
   async fn() {
     const jisyo = await load(globalJisyo, "euc-jp");
     const library = new Library([jisyo]);
-    await library.registerCandidate("okurinasi", "てすと", "test");
+    await library.registerHenkanResult("okurinasi", "てすと", "test");
 
     // remove dup
-    const nasi = await library.getCandidate("okurinasi", "てすと");
+    const nasi = await library.getHenkanResult("okurinasi", "てすと");
     assertEquals(["test", "テスト"], nasi);
 
     // new candidate
     // user candidates priority is higher than global
-    await library.registerCandidate("okurinasi", "てすと", "てすと");
-    const nasi2 = await library.getCandidate("okurinasi", "てすと");
+    await library.registerHenkanResult("okurinasi", "てすと", "てすと");
+    const nasi2 = await library.getHenkanResult("okurinasi", "てすと");
     assertEquals(["てすと", "test", "テスト"], nasi2);
   },
 });
@@ -142,10 +193,10 @@ Deno.test({
       // load
       const dic = new UserDictionary();
       await dic.load({ path: tmp });
-      assertEquals(await dic.getCandidate("okurinasi", "あ"), ["あ"]);
+      assertEquals(await dic.getHenkanResult("okurinasi", "あ"), ["あ"]);
 
       //save
-      dic.registerCandidate("okurinasi", "あ", "亜");
+      dic.registerHenkanResult("okurinasi", "あ", "亜");
       await dic.save();
       const data = await Deno.readTextFile(tmp);
       const line = data.split("\n").find((value) => value.startsWith("あ"));
@@ -160,14 +211,14 @@ Deno.test({
   name: "don't register empty candidate",
   async fn() {
     const dic = new UserDictionary();
-    dic.registerCandidate("okurinasi", "ほげ", "");
-    dic.registerCandidate("okuriari", "ほげ", "");
+    dic.registerHenkanResult("okurinasi", "ほげ", "");
+    dic.registerHenkanResult("okuriari", "ほげ", "");
     assertEquals(
-      await dic.getCandidate("okurinasi", "ほげ"),
+      await dic.getHenkanResult("okurinasi", "ほげ"),
       [],
     );
     assertEquals(
-      await dic.getCandidate("okuriari", "ほげ"),
+      await dic.getHenkanResult("okuriari", "ほげ"),
       [],
     );
   },
@@ -178,19 +229,19 @@ Deno.test({
   async fn() {
     // ランクは保存されていた順序あるいは登録された時刻で表される
     // 適切に比較すると最近登録した物ほど先頭に並ぶようにソートできる
-    // 候補はgetCandidatesの結果によりフィルタリングされる
+    // 候補はgetCompletionResultの結果によりフィルタリングされる
     const dic = new UserDictionary();
-    dic.registerCandidate("okurinasi", "ほげ", "hoge");
-    dic.registerCandidate("okurinasi", "ぴよ", "piyo");
+    dic.registerHenkanResult("okurinasi", "ほげ", "hoge");
+    dic.registerHenkanResult("okurinasi", "ぴよ", "piyo");
     await new Promise((r) => setTimeout(r, 2));
-    dic.registerCandidate("okurinasi", "ほげほげ", "hogehoge");
+    dic.registerHenkanResult("okurinasi", "ほげほげ", "hogehoge");
     const a = dic.getRanks("ほげ")
       .sort((a, b) => b[1] - a[1])
       .map((e) => e[0]);
     assertEquals(a, ["hogehoge", "hoge"]);
 
     await new Promise((r) => setTimeout(r, 2));
-    dic.registerCandidate("okurinasi", "ほげ", "hoge");
+    dic.registerHenkanResult("okurinasi", "ほげ", "hoge");
     const b = dic.getRanks("ほげ")
       .sort((a, b) => b[1] - a[1])
       .map((e) => e[0]);
@@ -209,12 +260,12 @@ Deno.test({
       [globalJisyo, "euc-jp"],
       [globalJisyo2, "utf-8"],
     ], {});
-    assertEquals(await lib.getCandidate("okurinasi", "てすと"), [
+    assertEquals(await lib.getHenkanResult("okurinasi", "てすと"), [
       "テスト",
       "test",
       "ﾃｽﾄ",
     ]);
-    assertEquals(await lib.getCandidate("okurinasi", "あ"), ["a"]);
-    assertEquals(await lib.getCandidate("okurinasi", "い"), ["i"]);
+    assertEquals(await lib.getHenkanResult("okurinasi", "あ"), ["a"]);
+    assertEquals(await lib.getHenkanResult("okurinasi", "い"), ["i"]);
   },
 });

@@ -168,6 +168,7 @@ g:skkeleton#state                                          *g:skkeleton#state*
                     "input:okurinasi"  送りなし入力
                     "input:okuriari"   送りあり入力
                     "henkan"           変換
+                    "escape"           escapeした際
 
 ------------------------------------------------------------------------------
 CONFIG                                                      *skkeleton-config*
@@ -317,6 +318,13 @@ skkServerResEnc                 *skkeleton-config-skkServerResEnc*
         （デフォルト "euc-jp"）
         辞書サーバーから受け取る文字列のエンコード形式を指定します。
 
+useGoogleJapaneseInput               *skkeleton-config-useGoogleJapaneseInput*
+        (デフォルト v:false)
+        Google 日本語入力 API による変換を有効にします。
+        https://www.google.co.jp/ime/cgiapi.html
+        Note: ネットワーク接続環境が必要です。
+        Note: パフォーマンスの問題により補完には対応しません。
+
 usePopup                                           *skkeleton-config-usePopup*
         (デフォルト v:true)
         このオプションを有効にすると、変換候補がポップアップ表示されます。
@@ -399,6 +407,11 @@ COMPLETION                                              *skkeleton-completion*
     送りなし変換の仮名入力時に動作し、入力された仮名で始まる候補を表示します。
     候補の順番は|skkeleton-config-completionRankFile|で指定したファイルに
     保存できます。
+    ソース側で計算を行う特殊な仕様になっているため|ddc-source-option-matchers|
+    等を空にした上で|ddc-source-option-isVolatile|を指定し毎回計算が走るように
+    しています。
+    また、1文字だけ入力した際に、完全一致する候補だけを表示する機能を用意して
+    いるので、|ddc-source-option-minAutoCompleteLength|を1に変更しています。
 >
     " 例
     call ddc#custom#patch_global('sources', ['skkeleton'])
@@ -409,9 +422,11 @@ COMPLETION                                              *skkeleton-completion*
         \   },
         \   'skkeleton': {
         \     'mark': 'skkeleton',
-        \     'matchers': ['skkeleton'],
+        \     'matchers': [],
         \     'sorters': [],
+        \     'converters': [],
         \     'isVolatile': v:true,
+        \     'minAutoCompleteLength': 1,
         \   },
         \ })
     call skkeleton#config({'completionRankFile': '~/.skkeleton/rank.json'})
@@ -462,6 +477,12 @@ sticky keyの挙動をeskk.vimに合わせる~
 >
     call skkeleton#register_keymap('input', ';', 'henkanPoint')
 <
+新辞書形式 (JISYO) について~
+
+skkeletonでは旧来の ddskkにある辞書形式の他に JISYO形式と呼ばれる JSON/ YAMLで
+整形された辞書形式をサポートしています。これらは、SKK-JISYO.L.yamlのように
+拡張子に yaml, yml, json, mpk (msgpack) のいずれかが指定されているとき有効化されます。
+くわしくは、https://github.com/skk-dict/jisyo を参照してください。
 
 Vim の端末モードで漢字変換ができない~
 
@@ -484,6 +505,10 @@ skkeletonは|:lmap|を使用しなくなりました。カーソルの色を動�
 <
 ==============================================================================
 CHANGELOG                                                *skkeleton-changelog*
+
+2023-10-29~
+- |g:skkeleton#state|にて、|skkeleton-functions-escape|使用後の状態が変換扱い
+  されていたので修正
 
 2023-08-17~
 - |skkeleton-mode-changed|がcmdlineを抜けた際などに呼ばれていなかったので修正
