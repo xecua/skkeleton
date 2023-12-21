@@ -1,11 +1,11 @@
 import { config } from "../config.ts";
 import { Context } from "../context.ts";
 import { HenkanType } from "../jisyo.ts";
-import { currentKanaTable } from "../kana.ts";
+import { initializeStateWithAbbrev } from "../mode.ts";
 import { initializeState } from "../state.ts";
 import { currentLibrary } from "../store.ts";
 import { kakuteiFeed } from "./input.ts";
-import { initializeStateWithAbbrev } from "../mode.ts";
+import { hirakana } from "./mode.ts";
 
 export async function kakutei(context: Context) {
   const state = context.state;
@@ -40,10 +40,6 @@ export async function kakutei(context: Context) {
         result = state.converter(result);
       }
       context.kakutei(result);
-      if (currentKanaTable.get() === "zen") {
-        currentKanaTable.set(config.kanaTable);
-        state.converter = void 0;
-      }
       break;
     }
     default:
@@ -52,6 +48,17 @@ export async function kakutei(context: Context) {
       );
   }
   await initializeStateWithAbbrev(context, ["converter", "table"]);
+}
+
+export async function kakuteiKey(context: Context) {
+  const { state } = context;
+  // 確定する物が無い状態で確定しようとした際にモードを解除する
+  // この動作はddskkに存在する
+  if (state.type === "input" && state.mode === "direct" && state.feed === "") {
+    await hirakana(context);
+    return;
+  }
+  await kakutei(context);
 }
 
 export async function newline(context: Context) {

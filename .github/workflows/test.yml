@@ -9,18 +9,18 @@ on:
     branches:
       - main
     paths:
-      - "**/*.md"
       - "**/*.ts"
       - "**/*.vim"
       - ".github/workflows/test.yml"
       - "Makefile"
+      - "deno.json"
   pull_request:
     paths:
-      - "**/*.md"
       - "**/*.ts"
       - "**/*.vim"
       - ".github/workflows/test.yml"
       - "Makefile"
+      - "deno.json"
 
 defaults:
   run:
@@ -45,17 +45,17 @@ jobs:
       - run: git config --global init.defaultBranch main
       - run: git config --global core.autocrlf false
         if: runner.os == 'Windows'
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           path: "./repo"
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           repository: "vim-denops/denops.vim"
           path: "./denops.vim"
       - uses: denoland/setup-deno@v1
         with:
           deno-version: "${{ matrix.version }}"
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: cache
         with:
           path: ${{ env.DENO_DIR }}
@@ -65,10 +65,10 @@ jobs:
             ${{ runner.os }}-deno-
       - name: Lint check
         working-directory: ./repo
-        run: deno lint
+        run: deno task lint
       - name: Format check
         working-directory: ./repo
-        run: deno fmt --check
+        run: deno task fmt-check
       - uses: thinca/action-setup-vim@v1
         id: vim
         with:
@@ -94,7 +94,7 @@ jobs:
           DENOPS_TEST_NVIM: ${{ steps.nvim.outputs.executable_path }}
       - name: Test
         working-directory: ./repo
-        run: deno test -A
+        run: deno task test
         env:
           DENO_DIR: ../.deno
           DENOPS_TEST_VIM: ${{ steps.vim.outputs.executable_path }}
