@@ -10,6 +10,7 @@ export class SkkServer implements Dictionary {
   responseEncoding: Encoding;
   requestEncoding: Encoding;
   connectOptions: Deno.ConnectOptions;
+
   constructor(opts: SkkServerOptions) {
     this.requestEncoding = opts.requestEnc;
     this.responseEncoding = opts.responseEnc;
@@ -18,31 +19,47 @@ export class SkkServer implements Dictionary {
       port: opts.port,
     };
   }
+
   async connect() {
+    this.close();
     this.#conn = await Deno.connect(this.connectOptions);
   }
+
   async getHenkanResult(_type: HenkanType, word: string): Promise<string[]> {
+    await this.connect();
+
     if (!this.#conn) return [];
 
-    await this.#conn.write(encode(`1${word} `, this.requestEncoding));
     const result: string[] = [];
-    for await (
-      const str of iterLine(this.#conn.readable, this.responseEncoding)
-    ) {
-      result.push(...(str.at(0) === "4") ? [] : str.split("/").slice(1, -1));
+    try {
+      await this.write(`1${word} `);
 
-      if (str.endsWith("\n")) {
+      for await (
+        const str of iterLine(this.#conn.readable, this.responseEncoding)
+      ) {
+        if (str.length === 0) {
+          continue;
+        }
+
+        result.push(...(str.at(0) === "4") ? [] : str.split("/").slice(1, -1));
+
         break;
       }
+    } catch (_e) {
+      // NOTE: ReadableStream may be locked
     }
+
+    // NOTE: Close the current connection.
+    // Because the stream is locked.
+    this.close();
+
     return result;
   }
+
   async getCompletionResult(
     prefix: string,
     feed: string,
   ): Promise<CompletionData> {
-    if (!this.#conn) return [];
-
     let midashis: string[] = [];
     if (feed != "") {
       const table = getKanaTable();
@@ -66,27 +83,51 @@ export class SkkServer implements Dictionary {
 
     return candidates;
   }
+
   private async getMidashis(prefix: string): Promise<string[]> {
     // Get midashis from prefix
+    await this.connect();
+
     if (!this.#conn) return [];
 
-    await this.#conn.write(encode(`4${prefix} `, this.requestEncoding));
-    const midashis: string[] = [];
-    for await (
-      const str of iterLine(this.#conn.readable, this.responseEncoding)
-    ) {
-      midashis.push(...(str.at(0) === "4") ? [] : str.split("/").slice(1, -1));
+    const result: string[] = [];
+    try {
+      await this.write(`4${prefix} `);
 
-      if (str.endsWith("\n")) {
+      for await (
+        const str of iterLine(this.#conn.readable, this.responseEncoding)
+      ) {
+        if (str.length === 0) {
+          continue;
+        }
+
+        result.push(...(str.at(0) === "4") ? [] : str.split("/").slice(1, -1));
+
         break;
       }
+    } catch (_e) {
+      // NOTE: ReadableStream may be locked
     }
 
-    return midashis;
+    // NOTE: Close the current connection.
+    // Because the stream is locked.
+    this.close();
+
+    return result;
   }
+
   close() {
     this.#conn?.write(encode("0", this.requestEncoding));
     this.#conn?.close();
+    this.#conn = undefined;
+  }
+
+  private async write(str: string) {
+    if (!this.#conn) return;
+
+    await this.#conn.write(encode(str, this.requestEncoding));
+    const reader = this.#conn.readable.getReader();
+    reader.releaseLock();
   }
 }
 
@@ -103,9 +144,7 @@ async function* iterLine(
     .pipeThrough(new TextLineStream());
 
   for await (const line of lines) {
-    if ((line as string).length) {
-      yield line as string;
-    }
+    yield line as string;
   }
 }
 

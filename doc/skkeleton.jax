@@ -170,6 +170,14 @@ g:skkeleton#state                                          *g:skkeleton#state*
                     "henkan"           変換
                     "escape"           escapeした際
 
+						*skkeleton#update_database()*
+skkeleton#update_database({path} [, {encoding} [, {force}]])
+
+	データベースを手動で更新します。
+	- {path} 辞書のパス
+	- {encoding} 辞書のエンコード。省略するか空文字列だと自動で判別します
+	- {force} 辞書に更新がなくても強制的にデータベースを更新します
+
 ------------------------------------------------------------------------------
 CONFIG                                                      *skkeleton-config*
 
@@ -343,6 +351,17 @@ userJisyo                                     *skkeleton-config-userJisyo*
         ユーザー辞書のパス
         JavaScriptの制約によりエンコーディングはUTF-8限定になります。
 
+databasePath				*skkeleton-config-databasePath*
+	(デフォルト "")
+	データベースの保存先パスです。
+	空文字列でないときに有効になり、Deno KV を使って辞書をデータベース化し
+	ます。データベースの構築には通常の読み込みよりも時間がかかりますが、デ
+	ータベースはローカルなファイルに保存されるため、次回以降の起動は高速に
+	なります。大きな辞書で特に有効です。
+	データベースの構築は skkeleton の起動時に自動で行われます。mtime が以
+	前と変更された辞書のデータベースは更新します。手動で行うには
+	|skkeleton#update_database()| を使ってください。
+
 ------------------------------------------------------------------------------
                                               *skkeleton#register_kanatable()*
 skkeleton#register_kanatable({tableName}, {table} [, {create}])
@@ -489,11 +508,6 @@ skkeletonでは旧来の ddskkにある辞書形式の他に JISYO形式と呼�
 拡張子に yaml, yml, json, mpk (msgpack) のいずれかが指定されているとき有効化されます。
 くわしくは、https://github.com/skk-dict/jisyo を参照してください。
 
-Vim の端末モードで漢字変換ができない~
-
-Vim は |:terminal| の挙動が異なるので漢字の変換をサポートしていません。neovim
-は動作します。
-
 skkeleton有効時にカーソルの色がlCursorにならない~
 
 skkeletonは|:lmap|を使用しなくなりました。カーソルの色を動的に変更したい場合は
@@ -508,59 +522,16 @@ skkeletonは|:lmap|を使用しなくなりました。カーソルの色を動�
             \ highlight Cursor       gui=NONE guibg=#606060 guifg=fg
     augroup END
 <
+端末モードで補完が上手く動かない~
+
+補完を含めて上手く動作させるためにはバッファの状態と内部状態が一致しているかを
+調べる必要がありますが、端末のアプリケーションの出力でこれを行うのは困難なので
+無効化しています。
+
 ==============================================================================
-CHANGELOG                                                *skkeleton-changelog*
+COMPATIBILITY                                        *skkeleton-compatibility*
 
-2023-10-29~
-- |g:skkeleton#state|にて、|skkeleton-functions-escape|使用後の状態が変換扱い
-  されていたので修正
-
-2023-08-17~
-- |skkeleton-mode-changed|がcmdlineを抜けた際などに呼ばれていなかったので修正
-
-2023-08-01~
-- `immediatelyOkuriConvert`オプションを追加
-  - 直接かな入力を使っている場合などにデフォルトで発動するようになっています
-
-2023-07-11~
-- ローマ字テーブルに `z<Space>` を全角スペースにするルールを追加
-
-2023-07-10~
-- ターミナルモードで動作するようにした(thanks @Shougo)
-
-2023-06-23~
-- 状態取得のために|g:skkeleton#state|を追加した
-
-2023-06-17~
-- 伸ばし棒が半角カナの変換対象になっていなかったので修正
-
-2023-03-05~
-- ローマ字入力時に`z(`及び`z)`が使えなかったので修正
-
-2023-02-18~
-- 補完で入力が1文字の場合に完全一致した候補を出すようにした
-
-2023-01-24~
-- 有効化直後のモード切り替えイベントでモードの取得ができていなかった
-
-2023-01-21~
-- ロジックの問題により<Enter>表記の使用を禁止
-
-2022-04-25~
-- 補完ハンドリングの修正
-  - キーを奪うのをやめた
-- tabCompletionオプションの削除
-
-2022-03-27~
-- |skkeleton#register_kanatable()|の一部要素を省略可能にした
-
-2022-03-24~
-- abbrevモードを追加
-
-2022-02-28~
-- カタカナ変換などの際に送り仮名がひらがなになっていたので修正
-
-2022-02-27~
-- |skkeleton-config-completionRankFile|オプションの追加
+2023-12-30~
+- 補完の後処理と端末モードの相性が悪いので一旦無効化
 
 vim:tw=78:fo=tcq2mM:ts=8:ft=help:norl
