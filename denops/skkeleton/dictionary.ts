@@ -1,13 +1,9 @@
 import { config } from "./config.ts";
+import { toFileUrl } from "./deps/std/path.ts";
 import { JpNum } from "./deps/japanese_numeral.ts";
 import { RomanNum } from "./deps/roman.ts";
 import { zip } from "./deps/std/collections.ts";
 import type { CompletionData, RankData } from "./types.ts";
-import { SkkDictionary } from "./jisyo/skk_dictionary.ts";
-import { DenoKvDictionary } from "./jisyo/deno_kv.ts";
-import { UserDictionary, UserDictionaryPath } from "./jisyo/user_dictionary.ts";
-import { SkkServer } from "./jisyo/skk_server.ts";
-import { GoogleJapaneseInput } from "./jisyo/google_japanese_input.ts";
 
 export const okuriAriMarker = ";; okuri-ari entries.";
 export const okuriNasiMarker = ";; okuri-nasi entries.";
@@ -113,6 +109,34 @@ export interface Dictionary {
   getCompletionResult(prefix: string, feed: string): Promise<CompletionData>;
 }
 
+export type UserDictionaryPath = {
+  path?: string;
+  rankPath?: string;
+};
+
+export interface UserDictionary extends Dictionary {
+  getHenkanResult(type: HenkanType, word: string): Promise<string[]>;
+  getCompletionResult(prefix: string, feed: string): Promise<CompletionData>;
+  getRanks(prefix: string): RankData;
+  purgeCandidate(
+    type: HenkanType,
+    word: string,
+    candidate: string,
+  ): Promise<void>;
+  registerHenkanResult(
+    type: HenkanType,
+    word: string,
+    candidate: string,
+  ): Promise<void>;
+  load({ path, rankPath }: UserDictionaryPath): Promise<void>;
+  save(): Promise<void>;
+}
+
+export interface Source {
+  getDictionaries(): Promise<Dictionary[]>;
+  getUserDictionary?(): Promise<UserDictionary>;
+}
+
 export class NumberConvertWrapper implements Dictionary {
   #inner: Dictionary;
 
@@ -171,20 +195,24 @@ function gatherCandidates(
 
 export class Library {
   #dictionaries: Dictionary[];
-  #userDictionary: UserDictionary;
+  #userDictionary: UserDictionary | undefined;
 
   constructor(
     dictionaries?: Dictionary[],
     userDictionary?: UserDictionary,
   ) {
-    this.#userDictionary = userDictionary ?? new UserDictionary();
-    this.#dictionaries = [wrapDictionary(this.#userDictionary)].concat(
-      dictionaries ?? [],
-    );
+    this.#userDictionary = userDictionary ?? undefined;
+    this.#dictionaries = [];
+    if (userDictionary) {
+      this.#dictionaries = [wrapDictionary(userDictionary)];
+    }
+    if (dictionaries) {
+      this.#dictionaries = this.#dictionaries.concat(dictionaries);
+    }
   }
 
   async getHenkanResult(type: HenkanType, word: string): Promise<string[]> {
-    if (config.immediatelyJisyoRW) {
+    if (config.immediatelyDictionaryRW) {
       await this.load();
     }
     const merged = new Set<string>();
@@ -200,7 +228,7 @@ export class Library {
     prefix: string,
     feed: string,
   ): Promise<CompletionData> {
-    if (config.immediatelyJisyoRW) {
+    if (config.immediatelyDictionaryRW) {
       await this.load();
     }
     const collector = new Map<string, Set<string>>();
@@ -226,6 +254,10 @@ export class Library {
   }
 
   getRanks(prefix: string): RankData {
+    if (!this.#userDictionary) {
+      return [];
+    }
+
     return this.#userDictionary.getRanks(prefix);
   }
 
@@ -234,83 +266,65 @@ export class Library {
     word: string,
     candidate: string,
   ) {
+    if (!this.#userDictionary) {
+      return;
+    }
+
     this.#userDictionary.registerHenkanResult(type, word, candidate);
-    if (config.immediatelyJisyoRW) {
+    if (config.immediatelyDictionaryRW) {
       await this.#userDictionary.save();
     }
   }
 
   async purgeCandidate(type: HenkanType, word: string, candidate: string) {
+    if (!this.#userDictionary) {
+      return;
+    }
+
     this.#userDictionary.purgeCandidate(type, word, candidate);
-    if (config.immediatelyJisyoRW) {
+    if (config.immediatelyDictionaryRW) {
       await this.#userDictionary.save();
     }
   }
 
   async load() {
-    await this.#userDictionary.load();
+    if (!this.#userDictionary) {
+      return;
+    }
+
+    await this.#userDictionary.load({});
   }
 
   async save() {
+    if (!this.#userDictionary) {
+      return;
+    }
+
     await this.#userDictionary.save();
   }
 }
 
-export async function load(
-  globalDictionaryConfig: (string | [string, string])[],
-  userDictionaryPath: UserDictionaryPath,
-  skkServer?: SkkServer,
-  googleJapaneseInput?: GoogleJapaneseInput,
-): Promise<Library> {
-  const globalDictionaries = await Promise.all(
-    globalDictionaryConfig.map(async ([path, encodingName]) => {
-      try {
-        if (config.databasePath) {
-          const dict = await DenoKvDictionary.create(path, encodingName);
-          await dict.load();
-          return dict;
-        } else {
-          const dict = new SkkDictionary();
-          await dict.load(path, encodingName);
-          return dict;
-        }
-      } catch (e) {
-        console.error("globalDictionary loading failed");
-        console.error(`at ${path}`);
-        if (config.debug) {
-          console.error(e);
-        }
-        return new SkkDictionary();
-      }
-    }),
+export async function load(paths: Record<string, string>): Promise<Library> {
+  const userMod = await import(
+    toFileUrl(paths["sources/user_dictionary"]).href
   );
+  const userDictionary = await (new userMod.Source()).getUserDictionary();
 
-  const userDictionary = new UserDictionary();
-  try {
-    await userDictionary.load(userDictionaryPath);
-  } catch (e) {
-    if (config.debug) {
-      console.log("userDictionary loading failed");
-      console.log(e);
+  const dictionaries: Dictionary[] = [];
+  for (const source of config.sources) {
+    const key = `sources/${source}`;
+    const path = paths[key];
+
+    if (!path) {
+      console.error(`Invalid source name: ${source}`);
+      continue;
     }
-    // do nothing
-  }
 
-  try {
-    skkServer?.connect();
-  } catch (e) {
-    if (config.debug) {
-      console.log("connecting to skk server is failed");
-      console.log(e);
-    }
-  }
+    const mod = await import(toFileUrl(path).href);
 
-  const dictionaries = globalDictionaries.map((d) => wrapDictionary(d));
-  if (skkServer) {
-    dictionaries.push(skkServer);
-  }
-  if (googleJapaneseInput) {
-    dictionaries.push(googleJapaneseInput);
+    dictionaries.push(
+      ...await (new mod.Source().getDictionaries()),
+    );
   }
 
   return new Library(dictionaries, userDictionary);

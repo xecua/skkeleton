@@ -4,17 +4,18 @@ import { getKanaTable, loadKanaTableFiles } from "./kana.ts";
 import { ConfigOptions, Encode, Encoding } from "./types.ts";
 import { homeExpand } from "./util.ts";
 
-export const config: ConfigOptions = {
+export const config: Omit<ConfigOptions, "globalDictionaries"> & {
+  globalDictionaries: [string, string][];
+} = {
   acceptIllegalResult: false,
   completionRankFile: "",
+  databasePath: "",
   debug: false,
   eggLikeNewline: false,
   globalDictionaries: [],
-  globalJisyo: "/usr/share/skk/SKK-JISYO.L",
-  globalJisyoEncoding: "euc-jp",
   globalKanaTableFiles: [],
   immediatelyCancel: true,
-  immediatelyJisyoRW: true,
+  immediatelyDictionaryRW: true,
   immediatelyOkuriConvert: true,
   kanaTable: "rom",
   keepMode: false,
@@ -29,15 +30,13 @@ export const config: ConfigOptions = {
   skkServerPort: 1178,
   skkServerReqEnc: "euc-jp",
   skkServerResEnc: "euc-jp",
-  useGoogleJapaneseInput: false,
+  sources: ["skk_dictionary"],
   usePopup: true,
-  useSkkServer: false,
-  userJisyo: "~/.skkeleton",
-  databasePath: "",
+  userDictionary: "~/.skkeleton",
 };
 
 type Validators = {
-  [P in keyof typeof config]: (x: unknown) => typeof config[P];
+  [P in keyof ConfigOptions]: (x: unknown) => ConfigOptions[P];
 };
 
 function ensureEncoding(x: unknown): Encoding {
@@ -50,6 +49,7 @@ function ensureEncoding(x: unknown): Encoding {
 const validators: Validators = {
   acceptIllegalResult: (x) => ensure(x, is.Boolean),
   completionRankFile: (x) => ensure(x, is.String),
+  databasePath: (x) => ensure(x, is.String),
   debug: (x) => ensure(x, is.Boolean),
   eggLikeNewline: (x) => ensure(x, is.Boolean),
   globalDictionaries: (x): (string | [string, string])[] => {
@@ -62,8 +62,6 @@ const validators: Validators = {
     }
     return x;
   },
-  globalJisyo: (x) => ensure(x, is.String),
-  globalJisyoEncoding: ensureEncoding,
   globalKanaTableFiles: (x): (string | [string, string])[] => {
     if (
       !is.ArrayOf(
@@ -77,7 +75,7 @@ const validators: Validators = {
     return x;
   },
   immediatelyCancel: (x) => ensure(x, is.Boolean),
-  immediatelyJisyoRW: (x) => ensure(x, is.Boolean),
+  immediatelyDictionaryRW: (x) => ensure(x, is.Boolean),
   immediatelyOkuriConvert: (x) => ensure(x, is.Boolean),
   kanaTable: (x): string => {
     const name = ensure(x, is.String);
@@ -106,12 +104,45 @@ const validators: Validators = {
   skkServerPort: (x) => ensure(x, is.Number),
   skkServerReqEnc: ensureEncoding,
   skkServerResEnc: ensureEncoding,
+  sources: (x) => ensure(x, is.ArrayOf(is.String)),
+  useGoogleJapaneseInput: () => {
+    throw '`useGoogleJapaneseInput` is removed. Please use `sources` with "google_japanese_input"';
+  },
   usePopup: (x) => ensure(x, is.Boolean),
-  useGoogleJapaneseInput: (x) => ensure(x, is.Boolean),
-  useSkkServer: (x) => ensure(x, is.Boolean),
-  userJisyo: (x) => ensure(x, is.String),
-  databasePath: (x) => ensure(x, is.String),
+  useSkkServer: () => {
+    throw '`useSkkServer` is removed. Please use `sources` with "skk_server"';
+  },
+  userDictionary: (x) => ensure(x, is.String),
 };
+
+async function normalize(
+  denops: Denops,
+): Promise<void> {
+  config.globalDictionaries = await Promise.all(
+    config.globalDictionaries.map(async (cfg) => {
+      if (is.String(cfg)) {
+        return [await homeExpand(cfg, denops), ""];
+      } else {
+        return [await homeExpand(cfg[0], denops), cfg[1]];
+      }
+    }),
+  );
+  config.globalKanaTableFiles = await Promise.all(
+    config.globalKanaTableFiles.map(async (cfg) => {
+      if (is.String(cfg)) {
+        return await homeExpand(cfg, denops);
+      } else {
+        return [await homeExpand(cfg[0], denops), cfg[1]];
+      }
+    }),
+  );
+  config.userDictionary = await homeExpand(config.userDictionary, denops);
+  config.completionRankFile = await homeExpand(
+    config.completionRankFile,
+    denops,
+  );
+  config.databasePath = await homeExpand(config.databasePath, denops);
+}
 
 export async function setConfig(
   newConfig: Record<string, unknown>,
@@ -134,13 +165,7 @@ export async function setConfig(
       throw Error(`Illegal option detected: ${e}`);
     }
   }
+  await normalize(denops);
 
-  const files = config.globalKanaTableFiles.map(async (
-    x,
-  ): Promise<string | [string, string]> =>
-    Array.isArray(x)
-      ? [await homeExpand(x[0], denops), x[1]]
-      : await homeExpand(x, denops)
-  );
-  await loadKanaTableFiles(await Promise.all(files));
+  await loadKanaTableFiles(await Promise.all(config.globalKanaTableFiles));
 }

@@ -3,17 +3,15 @@ import { autocmd, Denops, fn, op, vars } from "./deps.ts";
 import { assert, AssertError, is } from "./deps/unknownutil.ts";
 import { functions, modeFunctions } from "./function.ts";
 import { disable as disableFunc } from "./function/disable.ts";
-import { load as jisyoLoad } from "./jisyo.ts";
-import { SkkServer } from "./jisyo/skk_server.ts";
-import { DenoKvDictionary } from "./jisyo/deno_kv.ts";
-import { GoogleJapaneseInput } from "./jisyo/google_japanese_input.ts";
+import { load as loadDictionary } from "./dictionary.ts";
+import { Dictionary as DenoKvDictionary } from "./sources/deno_kv.ts";
 import { currentKanaTable, registerKanaTable } from "./kana.ts";
 import { handleKey, registerKeyMap } from "./keymap.ts";
 import { initializeStateWithAbbrev } from "./mode.ts";
 import { keyToNotation, notationToKey, receiveNotation } from "./notation.ts";
 import { currentContext, currentLibrary, variables } from "./store.ts";
-import type { CompletionData, RankData, SkkServerOptions } from "./types.ts";
-import { homeExpand } from "./util.ts";
+import { globpath } from "./util.ts";
+import type { CompletionData, RankData } from "./types.ts";
 
 type Opts = {
   key: string | string[];
@@ -67,57 +65,18 @@ async function init(denops: Denops) {
     console.log(e);
   }
   currentContext.get().denops = denops;
-  const {
-    completionRankFile,
-    userJisyo,
-    useGoogleJapaneseInput,
-    useSkkServer,
-    skkServerHost,
-    skkServerPort,
-    skkServerResEnc,
-    skkServerReqEnc,
-  } = config;
-  let skkServer: SkkServer | undefined;
-  let googleJapaneseInput: GoogleJapaneseInput | undefined;
-  let skkServerOptions: SkkServerOptions | undefined;
-  if (useSkkServer) {
-    skkServerOptions = {
-      hostname: skkServerHost,
-      port: skkServerPort,
-      requestEnc: skkServerReqEnc,
-      responseEnc: skkServerResEnc,
-    };
-    skkServer = new SkkServer(skkServerOptions);
-  }
-  if (useGoogleJapaneseInput) {
-    googleJapaneseInput = new GoogleJapaneseInput();
-  }
-  const globalDictionaries = await Promise.all(
-    (config.globalDictionaries.length === 0
-      ? [[config.globalJisyo, config.globalJisyoEncoding]]
-      : config.globalDictionaries)
-      .map(async (
-        cfg,
-      ): Promise<[string, string]> => {
-        if (is.String(cfg)) {
-          return [await homeExpand(cfg, denops), ""];
-        } else {
-          return [await homeExpand(cfg[0], denops), cfg[1]];
-        }
-      }),
-  );
+
   currentLibrary.setInitializer(async () =>
-    await jisyoLoad(
-      globalDictionaries,
-      {
-        path: await homeExpand(userJisyo, denops),
-        rankPath: await homeExpand(completionRankFile, denops),
-      },
-      skkServer,
-      googleJapaneseInput,
+    loadDictionary(
+      await globpath(
+        denops,
+        "denops/skkeleton/sources",
+      ),
     )
   );
+
   await receiveNotation(denops);
+
   autocmd.group(denops, "skkeleton-internal-denops", (helper) => {
     helper.remove("*");
     // Note: 使い終わったステートを初期化する
@@ -133,11 +92,13 @@ async function init(denops: Denops) {
       `call skkeleton#disable()`,
     );
   });
+
   try {
     await denops.cmd("doautocmd <nomodeline> User skkeleton-initialize-post");
   } catch (e) {
     console.log(e);
   }
+
   initialized = true;
 }
 
@@ -294,6 +255,8 @@ function buildResult(result: string): HandleResult {
 }
 
 export async function main(denops: Denops) {
+  // Note: pending initialize for reload plugin
+  initialized = false;
   if (await vars.g.get(denops, "skkeleton#debug", false)) {
     config.debug = true;
   }
@@ -314,25 +277,26 @@ export async function main(denops: Denops) {
       registerKanaTable(tableName, table, !!create);
       return Promise.resolve();
     },
-    async enable(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
+    async handle(
+      func: unknown,
+      opts: unknown,
+      vimStatus: unknown,
+    ): Promise<HandleResult> {
       await init(denops);
-      return buildResult(await enable(opts, vimStatus));
-    },
-    async disable(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
-      await init(denops);
-      return buildResult(await disable(opts, vimStatus));
-    },
-    async toggle(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
-      await init(denops);
-      const mode = await vars.g.get(denops, "skkeleton#mode", "");
-      if (!await denops.eval("g:skkeleton#enabled") || mode === "") {
+      if (func === "handleKey") {
+        return buildResult(await handle(opts, vimStatus));
+      } else if (func === "enable") {
         return buildResult(await enable(opts, vimStatus));
-      } else {
+      } else if (func === "disable") {
         return buildResult(await disable(opts, vimStatus));
+      } else if (func === "toggle") {
+        const noMode = await vars.g.get(denops, "skkeleton#mode", "") === "";
+        const disabled = noMode || !await denops.eval("g:skkeleton#enabled");
+        return buildResult(
+          await (disabled ? enable(opts, vimStatus) : disable(opts, vimStatus)),
+        );
       }
-    },
-    async handleKey(opts: unknown, vimStatus: unknown): Promise<HandleResult> {
-      return buildResult(await handle(opts, vimStatus));
+      throw "Unsupported function: " + func;
     },
     reset() {
       currentContext.init().denops = denops;
@@ -388,7 +352,10 @@ export async function main(denops: Denops) {
     async getConfig() {
       return config;
     },
-    async initialize() {
+    async initialize(force = false) {
+      if (force) {
+        initialized = false;
+      }
       await init(denops);
 
       // NOTE: Initialize dictionary
