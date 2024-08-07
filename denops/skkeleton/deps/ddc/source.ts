@@ -1,1 +1,1 @@
-export * from "https://deno.land/x/ddc_vim@v4.3.1/base/source.ts";
+export * from "jsr:@shougo/ddc-vim@6.0.0/source";

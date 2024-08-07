@@ -1,2 +1,2 @@
-export type { TestDefinition } from "https://deno.land/x/denops_test@v1.6.2/tester.ts";
-export { test } from "https://deno.land/x/denops_test@v1.6.2/tester.ts";
+export type { TestDefinition } from "jsr:@denops/test@3.0.1";
+export { test } from "jsr:@denops/test@3.0.1";

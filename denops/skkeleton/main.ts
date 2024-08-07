@@ -1,6 +1,6 @@
 import { config, setConfig } from "./config.ts";
-import { autocmd, Denops, fn, op, vars } from "./deps.ts";
-import { assert, AssertError, is } from "./deps/unknownutil.ts";
+import { autocmd, Denops, Entrypoint, fn, vars } from "./deps.ts";
+import { is, u } from "./deps/unknownutil.ts";
 import { functions, modeFunctions } from "./function.ts";
 import { disable as disableFunc } from "./function/disable.ts";
 import { load as loadDictionary } from "./dictionary.ts";
@@ -45,7 +45,7 @@ function isOpts(x: any): x is Opts {
 
 function assertOpts(x: unknown): asserts x is Opts {
   if (!isOpts(x)) {
-    throw new AssertError("value must be Opts");
+    throw new u.AssertError("value must be Opts");
   }
 }
 
@@ -64,7 +64,7 @@ async function init(denops: Denops) {
   } catch (e) {
     console.log(e);
   }
-  currentContext.get().denops = denops;
+  currentContext.init().denops = denops;
 
   currentLibrary.setInitializer(async () =>
     loadDictionary(
@@ -127,10 +127,7 @@ async function enable(opts?: unknown, vimStatus?: unknown): Promise<string> {
     console.log(e);
   }
 
-  // NOTE: Disable textwidth
-  context.textwidth = await op.textwidth.getLocal(denops);
-  await op.textwidth.setLocal(denops, 0);
-
+  await denops.call("skkeleton#internal#option#save_and_set");
   await denops.call("skkeleton#map");
   await vars.b.set(denops, "keymap_name", "skkeleton");
   await vars.g.set(denops, "skkeleton#enabled", true);
@@ -254,26 +251,24 @@ function buildResult(result: string): HandleResult {
   };
 }
 
-export async function main(denops: Denops) {
-  // Note: pending initialize for reload plugin
-  initialized = false;
+export const main: Entrypoint = async (denops) => {
   if (await vars.g.get(denops, "skkeleton#debug", false)) {
     config.debug = true;
   }
   denops.dispatcher = {
     async config(config: unknown) {
-      assert(config, is.Record);
+      u.assert(config, is.Record);
       await setConfig(config, denops);
       return;
     },
     async registerKeyMap(state: unknown, key: unknown, funcName: unknown) {
-      assert(state, is.String);
-      assert(key, is.String);
+      u.assert(state, is.String);
+      u.assert(key, is.String);
       await receiveNotation(denops);
       registerKeyMap(state, key, funcName);
     },
     registerKanaTable(tableName: unknown, table: unknown, create: unknown) {
-      assert(tableName, is.String);
+      u.assert(tableName, is.String);
       registerKanaTable(tableName, table, !!create);
       return Promise.resolve();
     },
@@ -285,6 +280,8 @@ export async function main(denops: Denops) {
       await init(denops);
       if (func === "handleKey") {
         return buildResult(await handle(opts, vimStatus));
+      } else if (func === "setState") {
+        return buildResult(await enable(opts, vimStatus));
       } else if (func === "enable") {
         return buildResult(await enable(opts, vimStatus));
       } else if (func === "disable") {
@@ -337,8 +334,8 @@ export async function main(denops: Denops) {
       await denops.dispatcher.completeCallback(kana, word);
     },
     async completeCallback(kana: unknown, word: unknown) {
-      assert(kana, is.String);
-      assert(word, is.String);
+      u.assert(kana, is.String);
+      u.assert(word, is.String);
       const lib = await currentLibrary.get();
       await lib.registerHenkanResult("okurinasi", kana, word);
       const context = currentContext.get();
@@ -362,9 +359,9 @@ export async function main(denops: Denops) {
       await currentLibrary.get();
     },
     async updateDatabase(path: unknown, encoding: unknown, force: unknown) {
-      assert(path, is.String);
-      assert(encoding, is.String);
-      assert(force, is.Boolean);
+      u.assert(path, is.String);
+      u.assert(encoding, is.String);
+      u.assert(force, is.Boolean);
       await DenoKvDictionary.create(path, encoding)
         .then((dict) => dict.load(force));
       await denops.cmd(`echomsg 'updated database: "${path}"'`);
@@ -373,4 +370,13 @@ export async function main(denops: Denops) {
   if (config.debug) {
     await denops.cmd(`echomsg "loaded skkeleton"`);
   }
-}
+  return {
+    [Symbol.asyncDispose]: async () => {
+      initialized = false;
+      currentLibrary.init(); // TODO: dispose loaded dictionaries
+      await autocmd.group(denops, "skkeleton-internal-denops", (helper) => {
+        helper.remove("*");
+      });
+    },
+  };
+};

@@ -1,11 +1,13 @@
 import { config } from "./config.ts";
 import { distinctBy } from "./deps/std/collections.ts";
-import { assert, is } from "./deps/unknownutil.ts";
+import { is, u } from "./deps/unknownutil.ts";
 import { functions, functionsWithArgs } from "./function.ts";
 import { romToHira } from "./kana/rom_hira.ts";
 import { romToZen } from "./kana/rom_zen.ts";
 import type { KanaResult, KanaTable } from "./kana/type.ts";
 import { Cell, readFileWithEncoding } from "./util.ts";
+
+type PartialKanaTable = [string, KanaResult | null][];
 
 const tables: Cell<Record<string, KanaTable>> = new Cell(() => ({
   rom: romToHira,
@@ -22,7 +24,7 @@ export function getKanaTable(name = currentKanaTable.get()): KanaTable {
   return table;
 }
 
-function asKanaResult(result: unknown): KanaResult {
+function asKanaResult(result: unknown): KanaResult | null {
   if (is.String(result)) {
     const [funcName, args] = String(result).split("-");
     const fn = args
@@ -38,6 +40,8 @@ function asKanaResult(result: unknown): KanaResult {
     result.every(is.String)
   ) {
     return [result[0], result[1] ?? ""] as KanaResult;
+  } else if (!result) {
+    return null;
   }
   throw Error(`Illegal result: ${result}`);
 }
@@ -51,17 +55,16 @@ export function registerKanaTable(
     console.log("skkeleton: new kana table");
     console.log(`name: ${name}, table: ${Deno.inspect(rawTable)}`);
   }
-  assert(rawTable, is.Record);
-  const table: KanaTable = Object.entries(rawTable).map((e) => [
-    e[0],
-    asKanaResult(e[1]),
-  ]);
+  u.assert(rawTable, is.Record);
+  const table: PartialKanaTable = Object.entries(rawTable)
+    .map(([kana, result]) => {
+      return [kana, asKanaResult(result)];
+    });
   injectKanaTable(name, table, create);
 }
 
 export async function loadKanaTableFiles(
-  payload: (string | [string, string])[]
-): Promise<void> {
+  payload: (string | [string, string])[]): Promise<void> {
   const table: KanaTable = [];
 
   const tasks = payload.map(async (v) => {
@@ -88,12 +91,16 @@ export async function loadKanaTableFiles(
  * Concat given kanaTable to the table named `name`.
  * When the table is not found, create if create=true; otherwise throws `table ${name} is not found`.
  */
-function injectKanaTable(name: string, table: KanaTable, create = false) {
+function injectKanaTable(
+  name: string,
+  table: PartialKanaTable,
+  create = false,
+) {
   const t = tables.get();
   if (!t[name] && !create) {
     throw Error(`table ${name} is not found.`);
   }
-  t[name] = distinctBy([...table, ...(t[name] ?? [])], (it) => it[0]).sort(
-    (a, b) => a[0].localeCompare(b[0])
-  );
+  t[name] = distinctBy([...table, ...t[name] ?? []], (it) => it[0])
+    .filter((e): e is [string, KanaResult] => e[1] != null)
+    .sort((a, b) => a[0].localeCompare(b[0]));
 }

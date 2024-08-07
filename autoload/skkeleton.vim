@@ -177,25 +177,6 @@ endfunction "}}}
 
 let g:skkeleton#mapped_keys = extend(get(g:, 'skkeleton#mapped_keys', []), skkeleton#get_default_mapped_keys())
 
-let s:mapbuf = {}
-
-" 現在のマッピングを保存する
-" disable時に復元される
-function skkeleton#save_map(mode, lhs)
-  if type(a:lhs) == v:t_string
-    let list = [a:lhs]
-  else
-    let list = a:lhs
-  endif
-  let b = bufnr()
-  let s:mapbuf[b] = get(s:mapbuf, b, {})
-  let s:mapbuf[b][a:mode] = get(s:mapbuf[b], a:mode, {})
-  let mapbuf = s:mapbuf[b][a:mode]
-  for lhs in list
-    let mapbuf[lhs] = get(mapbuf, lhs, maparg(lhs, a:mode, v:false, v:true))
-  endfor
-endfunction
-
 function! skkeleton#map() abort
   if mode() ==# 'n'
     let modes = ['i', 'c']
@@ -204,10 +185,9 @@ function! skkeleton#map() abort
     let modes = [mode()]
     let mode = mode()
   endif
-  let b = bufnr()
-  let s:mapbuf[b] = get(s:mapbuf, b, {})
-  let s:mapbuf[b][mode] = get(s:mapbuf[b], mode, {})
-  let mapbuf = s:mapbuf[b][mode]
+
+  call skkeleton#internal#map#save(mode)
+
   for c in g:skkeleton#mapped_keys
     " notation to lower
     if len(c) > 1 && c[0] ==# '<' && c !=? '<bar>'
@@ -223,32 +203,17 @@ function! skkeleton#map() abort
         let func = match[1]
       endif
     endfor
-    let mapbuf[c] = get(mapbuf, c, maparg(c, mode, v:false, v:true))
     execute printf('%snoremap <buffer> <nowait> %s <Cmd>call skkeleton#handle(%s, {"key": %s})<CR>',
           \ mode,
           \ c, string(func), string(k))
   endfor
 endfunction
 
-function! skkeleton#unmap() abort
-  let b = bufnr()
-  let mapbuf = get(s:mapbuf, b, {})
-  for [mode, keys] in items(mapbuf)
-    for [key, map] in items(keys)
-      if get(map, 'buffer', 0)
-        call mapset(mode, v:false, map)
-      else
-        execute printf('%sunmap <buffer> %s', mode, key)
-      endif
-    endfor
-  endfor
-  let s:mapbuf[b] = {}
-endfunction
-
 function! skkeleton#disable()
   if g:skkeleton#enabled
     doautocmd <nomodeline> User skkeleton-disable-pre
-    call skkeleton#unmap()
+    call skkeleton#internal#map#restore()
+    call skkeleton#internal#option#restore()
     let g:skkeleton#mode = ''
     doautocmd <nomodeline> User skkeleton-mode-changed
     doautocmd <nomodeline> User skkeleton-disable-post

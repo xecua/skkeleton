@@ -1,3 +1,4 @@
+import { modifyCandidate } from "../candidate.ts";
 import { config } from "../config.ts";
 import type { Context } from "../context.ts";
 import type { Denops } from "../deps.ts";
@@ -7,9 +8,8 @@ import { keyToNotation } from "../notation.ts";
 import { getOkuriStr } from "../okuri.ts";
 import { HenkanState, initializeState } from "../state.ts";
 import { kakutei } from "./common.ts";
-import { henkanPoint, kakuteiFeed } from "./input.ts";
+import { acceptResult, henkanPoint, kakuteiFeed } from "./input.ts";
 import { registerWord } from "./dictionary.ts";
->>>>>>> upstream/main
 
 export async function henkanFirst(context: Context, key: string) {
   if (context.state.type !== "input") {
@@ -37,6 +37,20 @@ export async function henkanFirst(context: Context, key: string) {
     ? state.henkanFeed
     : getOkuriStr(state.henkanFeed, state.okuriFeed);
   state.word = word;
+  if (
+    state.affix == null &&
+    !state.directInput &&
+    ["okurinasi", "okuriari"].includes(state.mode)
+  ) {
+    // When user maunally uses henkanPoint,
+    // henkanFeed like `>prefix` and `suffix>` may
+    // reach here with undefined affix
+    state.affix = state.henkanFeed.match(">$")
+      ? "prefix"
+      : state.henkanFeed.match("^>")
+      ? "suffix"
+      : undefined;
+  }
   state.candidates = await lib.getHenkanResult(state.mode, word);
   await henkanForward(context);
 }
@@ -106,8 +120,9 @@ async function selectCandidates(context: Context) {
       }
     }
     const candidates = state.candidates.slice(start, start + keys.length);
-    const msg = candidates.map((c, i) => `${keys[i]}: ${c.replace(/;.*/, "")}`)
-      .join(" ");
+    const msg = candidates.map((c, i) =>
+      `${keys[i]}: ${modifyCandidate(c, state.affix)}`
+    ).join(" ");
     let keyCode: number;
     try {
       keyCode = await denops.call("skkeleton#getchar", msg) as number;
@@ -150,7 +165,7 @@ async function showCandidates(denops: Denops, state: HenkanState) {
   const idx = state.candidateIndex;
   const candidates = state.candidates.slice(idx, idx + 7);
   const list = candidates.map((c, i) =>
-    `${config.selectCandidateKeys[i]}: ${c.replace(/;.*/, "")}`
+    `${config.selectCandidateKeys[i]}: ${modifyCandidate(c, state.affix)}`
   );
   await denops.call("skkeleton#popup#open", list);
 }
@@ -177,4 +192,15 @@ export function upper(key: string) {
     henkanPoint(context);
     await handleKey(context, key);
   };
+}
+
+export async function suffix(context: Context) {
+  if (context.state.type !== "henkan") {
+    return;
+  }
+
+  await kakutei(context);
+  henkanPoint(context);
+  await acceptResult(context, [">", ""], "");
+  context.state.affix = "suffix";
 }
